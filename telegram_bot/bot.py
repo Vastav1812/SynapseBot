@@ -4,16 +4,13 @@ import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, 
-    CallbackQueryHandler, ContextTypes, filters,
-    Defaults
+    CallbackQueryHandler, ContextTypes, filters
 )
 import logging
 from typing import Dict, List, Optional, Union
 from datetime import datetime
-import time
-import pytz
-from telegram import error as telegram_error
 import traceback
+import pytz
 
 class SynapseBot:
     def __init__(self, token: str, gemini_client, orchestrator):
@@ -91,6 +88,12 @@ How can I help you today?"""
             parse_mode='Markdown'
         )
         
+        # Send typing action
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id,
+            action="typing"
+        )
+        
         # Get CEO's initial assessment
         try:
             ceo_task = {
@@ -114,7 +117,7 @@ How can I help you today?"""
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await update.message.reply_text(
-                ceo_message,
+                ceo_message[:4000],  # Respect Telegram limit
                 parse_mode='Markdown',
                 reply_markup=reply_markup
             )
@@ -134,27 +137,128 @@ How can I help you today?"""
         data = query.data
         user_id = update.effective_user.id
         
-        if data == "new_project":
+        try:
+            if data == "new_project":
+                await query.edit_message_text(
+                    "Please use `/newproject [project name]` to start a new project.",
+                    parse_mode='Markdown'
+                )
+                
+            elif data == "team_meeting":
+                await self._handle_quick_team_meeting(query)
+                
+            elif data == "status":
+                await self._handle_quick_status(query)
+                
+            elif data == "quick_idea":
+                await self._handle_quick_idea(query)
+                
+            elif data.startswith("tech_assessment:"):
+                project_name = data.split(":", 1)[1]
+                await self._handle_tech_assessment(query, project_name)
+                
+            elif data.startswith("project_planning:"):
+                project_name = data.split(":", 1)[1]
+                await self._handle_project_planning(query, project_name)
+                
+            elif data.startswith("design_concept:"):
+                project_name = data.split(":", 1)[1]
+                await self._handle_design_concept(query, project_name)
+                
+            elif data.startswith("team_discussion:"):
+                project_name = data.split(":", 1)[1]
+                await self._handle_team_discussion(query, project_name)
+                
+            elif data.startswith("talk_"):
+                agent = data.replace("talk_", "")
+                await self._handle_talk_to_agent(query, agent)
+                
+        except Exception as e:
+            self.logger.error(f"Error in callback handler: {e}")
             await query.edit_message_text(
-                "Please use `/newproject [project name]` to start a new project.",
+                "⚠️ An error occurred. Please try again.",
+                parse_mode='Markdown'
+            )
+    
+    async def _handle_quick_team_meeting(self, query):
+        """Handle quick team meeting"""
+        await query.edit_message_text(
+            "👥 **Quick Team Meeting**\n\nWhat would you like to discuss?",
+            parse_mode='Markdown'
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton("📊 Project Updates", callback_data="meeting_updates")],
+            [InlineKeyboardButton("💡 Brainstorming", callback_data="meeting_brainstorm")],
+            [InlineKeyboardButton("⚠️ Problem Solving", callback_data="meeting_problems")],
+            [InlineKeyboardButton("🔙 Back", callback_data="start")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.message.edit_reply_markup(reply_markup=reply_markup)
+    
+    async def _handle_quick_status(self, query):
+        """Handle quick status check"""
+        try:
+            status_message = "📊 **System Status**\n\n"
+            
+            # Get team report
+            team_report = await self.orchestrator.generate_team_report()
+            
+            status_message += f"✅ **Active Projects:** {team_report.get('active_projects', 0)}\n"
+            status_message += f"👥 **Team Activity:** {team_report.get('recent_activity', {}).get('total_interactions', 0)} interactions\n"
+            status_message += f"🔥 **Most Active:** {team_report.get('recent_activity', {}).get('most_active_agent', 'N/A')}\n\n"
+            
+            status_message += "**Agent Status:**\n"
+            for agent, status in team_report.get('agent_status', {}).items():
+                emoji = {'ceo': '👔', 'developer': '💻', 'project_manager': '📊', 'designer': '🎨'}.get(agent, '👤')
+                status_message += f"{emoji} {agent.title()}: {status.get('active_tasks', 0)} active tasks\n"
+            
+            await query.edit_message_text(
+                status_message,
                 parse_mode='Markdown'
             )
             
-        elif data.startswith("tech_assessment:"):
-            project_name = data.split(":", 1)[1]
-            await self._handle_tech_assessment(query, project_name)
+        except Exception as e:
+            self.logger.error(f"Error in quick status: {e}")
+            await query.edit_message_text(
+                "⚠️ Unable to fetch status. Please try again.",
+                parse_mode='Markdown'
+            )
+    
+    async def _handle_quick_idea(self, query):
+        """Handle quick idea submission"""
+        await query.edit_message_text(
+            "💡 **Quick Idea Session**\n\nPlease type your idea and I'll have the team evaluate it!",
+            parse_mode='Markdown'
+        )
+        
+        # Set user state to expect idea input
+        user_id = query.from_user.id
+        if user_id in self.user_sessions:
+            self.user_sessions[user_id]['state'] = 'awaiting_idea'
+    
+    async def _handle_talk_to_agent(self, query, agent: str):
+        """Handle direct conversation with specific agent"""
+        agent_map = {
+            'ceo': ('ceo', '👔 CEO - Alex Chen'),
+            'dev': ('developer', '💻 Developer - Sarah Kim'),
+            'pm': ('project_manager', '📊 PM - Mike Johnson'),
+            'designer': ('designer', '🎨 Designer - Emma Davis')
+        }
+        
+        if agent in agent_map:
+            agent_key, agent_name = agent_map[agent]
             
-        elif data.startswith("project_planning:"):
-            project_name = data.split(":", 1)[1]
-            await self._handle_project_planning(query, project_name)
+            await query.edit_message_text(
+                f"Connected to {agent_name}\n\nHow can I help you today?",
+                parse_mode='Markdown'
+            )
             
-        elif data.startswith("design_concept:"):
-            project_name = data.split(":", 1)[1]
-            await self._handle_design_concept(query, project_name)
-            
-        elif data.startswith("team_discussion:"):
-            project_name = data.split(":", 1)[1]
-            await self._handle_team_discussion(query, project_name)
+            # Set user state to talk to specific agent
+            user_id = query.from_user.id
+            if user_id in self.user_sessions:
+                self.user_sessions[user_id]['state'] = f'talking_to_{agent_key}'
     
     async def _handle_tech_assessment(self, query, project_name: str):
         """Handle technical assessment request"""
@@ -181,7 +285,7 @@ How can I help you today?"""
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.edit_message_text(
-                message,
+                message[:4000],
                 parse_mode='Markdown',
                 reply_markup=reply_markup
             )
@@ -218,7 +322,7 @@ How can I help you today?"""
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.edit_message_text(
-                message,
+                message[:4000],
                 parse_mode='Markdown',
                 reply_markup=reply_markup
             )
@@ -227,6 +331,43 @@ How can I help you today?"""
             self.logger.error(f"Error in project planning: {e}")
             await query.edit_message_text(
                 "⚠️ Error creating project plan. Please try again.",
+                parse_mode='Markdown'
+            )
+    
+    async def _handle_design_concept(self, query, project_name: str):
+        """Handle design concept request"""
+        await query.edit_message_text(
+            f"🎨 **Design Concept for {project_name}**\n\nCreating design vision...",
+            parse_mode='Markdown'
+        )
+        
+        try:
+            design_task = {
+                'type': 'design_concept',
+                'content': f"Create design concept for {project_name}",
+                'brief': True
+            }
+            
+            design_response = await self.orchestrator.route_to_agent('designer', design_task)
+            
+            message = f"🎨 **Designer's Vision:**\n\n{design_response.get('content', 'Processing...')}"
+            
+            keyboard = [
+                [InlineKeyboardButton("🖼️ Wireframes", callback_data=f"wireframes:{project_name}")],
+                [InlineKeyboardButton("🔙 Back to Options", callback_data=f"project_options:{project_name}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                message[:4000],
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error in design concept: {e}")
+            await query.edit_message_text(
+                "⚠️ Error creating design concept. Please try again.",
                 parse_mode='Markdown'
             )
     
@@ -249,7 +390,10 @@ How can I help you today?"""
             
             message = "👥 **Team Discussion Summary:**\n\n"
             
-            for agent, response in team_responses.items():
+            # Process responses correctly
+            responses = team_responses.get('responses', {})
+            
+            for agent, response in responses.items():
                 agent_emoji = {
                     'ceo': '👔',
                     'developer': '💻',
@@ -257,7 +401,8 @@ How can I help you today?"""
                     'designer': '🎨'
                 }.get(agent, '👤')
                 
-                message += f"{agent_emoji} **{agent.title()}:**\n{response.get('content', 'No response')}\n\n"
+                content = response.get('content', 'No response') if isinstance(response, dict) else str(response)
+                message += f"{agent_emoji} **{agent.title()}:**\n{content[:500]}...\n\n"
             
             keyboard = [
                 [InlineKeyboardButton("✅ Approve Project", callback_data=f"approve:{project_name}")],
@@ -267,13 +412,14 @@ How can I help you today?"""
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.edit_message_text(
-                message[:4000],  # Telegram message limit
+                message[:4000],
                 parse_mode='Markdown',
                 reply_markup=reply_markup
             )
             
         except Exception as e:
             self.logger.error(f"Error in team discussion: {e}")
+            self.logger.error(traceback.format_exc())
             await query.edit_message_text(
                 "⚠️ Error during team discussion. Please try again.",
                 parse_mode='Markdown'
@@ -294,11 +440,134 @@ How can I help you today?"""
         
         session = self.user_sessions[user_id]
         
-        # Route message based on session state
-        if session['state'] == 'project_planning':
-            await self._handle_project_message(update, context, message)
-        else:
-            await self._handle_general_message(update, context, message)
+        # Send typing action
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id,
+            action="typing"
+        )
+        
+        try:
+            # Route based on session state
+            if session['state'] == 'awaiting_idea':
+                await self._handle_idea_submission(update, context, message)
+            elif session['state'].startswith('talking_to_'):
+                agent = session['state'].replace('talking_to_', '')
+                await self._handle_agent_conversation(update, context, message, agent)
+            elif session['state'] == 'project_planning':
+                await self._handle_project_message(update, context, message)
+            else:
+                await self._handle_general_message(update, context, message)
+                
+        except Exception as e:
+            self.logger.error(f"Error handling message: {e}")
+            await update.message.reply_text(
+                "⚠️ Sorry, I encountered an error. Please try again.",
+                parse_mode='Markdown'
+            )
+    
+    async def _handle_idea_submission(self, update: Update, context: ContextTypes.DEFAULT_TYPE, idea: str):
+        """Handle idea submission"""
+        user_id = update.effective_user.id
+        
+        # Reset state
+        self.user_sessions[user_id]['state'] = 'idle'
+        
+        await update.message.reply_text(
+            "💡 **Evaluating your idea...**\n\nThe team is reviewing it!",
+            parse_mode='Markdown'
+        )
+        
+        try:
+            # Get team evaluation
+            idea_task = {
+                'type': 'idea_evaluation',
+                'content': f"Evaluate this idea: {idea}",
+                'brief': True
+            }
+            
+            responses = await self.orchestrator.get_team_consensus(idea_task)
+            
+            # Format response
+            message = "💡 **Team Evaluation:**\n\n"
+            
+            for agent, response in responses.get('responses', {}).items():
+                emoji = {'ceo': '👔', 'developer': '💻', 'project_manager': '📊', 'designer': '🎨'}.get(agent, '👤')
+                content = response.get('content', 'No response') if isinstance(response, dict) else str(response)
+                message += f"{emoji} **{agent.title()}:** {content[:200]}...\n\n"
+            
+            await update.message.reply_text(
+                message[:4000],
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error evaluating idea: {e}")
+            await update.message.reply_text(
+                "⚠️ Error evaluating idea. Please try again.",
+                parse_mode='Markdown'
+            )
+    
+    async def _handle_agent_conversation(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                       message: str, agent: str):
+        """Handle conversation with specific agent"""
+        try:
+            task = {
+                'type': 'conversation',
+                'content': message,
+                'brief': True
+            }
+            
+            response = await self.orchestrator.route_to_agent(agent, task)
+            
+            formatted_response = self._format_agent_response(response)
+            
+            keyboard = [
+                [InlineKeyboardButton("👥 Ask Another Agent", callback_data="team")],
+                [InlineKeyboardButton("🔙 Main Menu", callback_data="start")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                formatted_response[:4000],
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error in agent conversation: {e}")
+            await update.message.reply_text(
+                "⚠️ Error getting response. Please try again.",
+                parse_mode='Markdown'
+            )
+    
+    async def _handle_project_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE, message: str):
+        """Handle messages during project planning"""
+        user_id = update.effective_user.id
+        project_name = self.user_sessions[user_id]['context'].get('project_name', 'Unknown')
+        
+        try:
+            # Route to PM for project-related queries
+            task = {
+                'type': 'project_query',
+                'content': f"Regarding project {project_name}: {message}",
+                'brief': True
+            }
+            
+            response = await self.orchestrator.route_to_agent('project_manager', task)
+            
+            formatted_response = self._format_agent_response(response)
+            
+            await update.message.reply_text(
+                formatted_response[:4000],
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error handling project message: {e}")
+            await update.message.reply_text(
+                "⚠️ Error processing your message. Please try again.",
+                parse_mode='Markdown'
+            )
     
     async def _handle_general_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE, message: str):
         """Handle general conversation"""
@@ -312,24 +581,18 @@ How can I help you today?"""
             
             response = await self.orchestrator.analyze_and_route(task)
             
-            if response:
-                formatted_response = self._format_agent_response(response)
-                
-                # Add follow-up options
-                keyboard = self._create_follow_up_keyboard(response)
-                reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
-                
-                await update.message.reply_text(
-                    formatted_response,
-                    parse_mode='Markdown',
-                    reply_markup=reply_markup
-                )
-            else:
-                await update.message.reply_text(
-                    "I'm not sure how to help with that. Try /help for available commands.",
-                    parse_mode='Markdown'
-                )
-                
+            formatted_response = self._format_agent_response(response)
+            
+            # Add follow-up options
+            keyboard = self._create_follow_up_keyboard(response)
+            reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+            
+            await update.message.reply_text(
+                formatted_response[:4000],
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            
         except Exception as e:
             self.logger.error(f"Error handling message: {e}")
             await update.message.reply_text(
@@ -339,6 +602,9 @@ How can I help you today?"""
     
     def _format_agent_response(self, response: Dict) -> str:
         """Format agent response for Telegram"""
+        if not isinstance(response, dict):
+            return str(response)
+            
         agent = response.get('sender', 'Unknown')
         role = response.get('role', '')
         content = response.get('content', '')
@@ -354,32 +620,33 @@ How can I help you today?"""
         
         # Add confidence indicator if available
         confidence = response.get('confidence')
-        if confidence:
+        if confidence and isinstance(confidence, (int, float)):
             confidence_bar = '🟢' if confidence > 0.8 else '🟡' if confidence > 0.5 else '🔴'
             formatted += f"\n\n{confidence_bar} Confidence: {confidence:.0%}"
         
-        return formatted[:4000]  # Telegram limit
+        return formatted
     
     def _create_follow_up_keyboard(self, response: Dict) -> List[List[InlineKeyboardButton]]:
         """Create follow-up action buttons based on response"""
         keyboard = []
         
         # Check for suggested next agents
-        next_agent = response.get('suggest_next_agent')
-        if next_agent:
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"Ask {next_agent.title()}", 
-                    callback_data=f"ask_agent:{next_agent}"
-                )
-            ])
-        
-        # Add standard options
-        if response.get('requires_follow_up'):
-            keyboard.append([
-                InlineKeyboardButton("📝 More Details", callback_data="more_details"),
-                InlineKeyboardButton("👥 Team Input", callback_data="team_input")
-            ])
+        if isinstance(response, dict):
+            next_agent = response.get('suggest_next_agent')
+            if next_agent:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"Ask {next_agent.title()}", 
+                        callback_data=f"ask_agent:{next_agent}"
+                    )
+                ])
+            
+            # Add standard options
+            if response.get('requires_follow_up'):
+                keyboard.append([
+                    InlineKeyboardButton("📝 More Details", callback_data="more_details"),
+                    InlineKeyboardButton("👥 Team Input", callback_data="team_input")
+                ])
         
         # Always add help option
         keyboard.append([InlineKeyboardButton("❓ Help", callback_data="help")])
@@ -393,13 +660,19 @@ How can I help you today?"""
         
         status_message = "📊 **Current Status**\n\n"
         
-        if session.get('context', {}).get('project_name'):
-            project_name = session['context']['project_name']
-            status_message += f"🚀 **Active Project:** {project_name}\n"
-            status_message += f"📍 **Stage:** {session.get('state', 'Unknown')}\n\n"
-            
-            # Get project status from orchestrator
-            try:
+        # Send typing action
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id,
+            action="typing"
+        )
+        
+        try:
+            if session.get('context', {}).get('project_name'):
+                project_name = session['context']['project_name']
+                status_message += f"🚀 **Active Project:** {project_name}\n"
+                status_message += f"📍 **Stage:** {session.get('state', 'Unknown')}\n\n"
+                
+                # Get project status from orchestrator
                 status_task = {
                     'type': 'project_status',
                     'content': f"Status update for {project_name}",
@@ -408,12 +681,12 @@ How can I help you today?"""
                 
                 status_response = await self.orchestrator.get_project_status(status_task)
                 status_message += status_response.get('content', 'No status available')
+            else:
+                status_message += "No active project. Use /newproject to start!"
                 
-            except Exception as e:
-                self.logger.error(f"Error getting status: {e}")
-                status_message += "Status information temporarily unavailable."
-        else:
-            status_message += "No active project. Use /newproject to start!"
+        except Exception as e:
+            self.logger.error(f"Error getting status: {e}")
+            status_message += "\n\nStatus information temporarily unavailable."
         
         keyboard = [
             [InlineKeyboardButton("🚀 New Project", callback_data="new_project")],
@@ -422,7 +695,7 @@ How can I help you today?"""
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            status_message,
+            status_message[:4000],
             parse_mode='Markdown',
             reply_markup=reply_markup
         )
@@ -467,28 +740,19 @@ What would you like to discuss with the team?"""
 **Project Management:**
 • `/newproject [name]` - Start a new project
 • `/status` - Check current project status
-• `/tasks` - View and manage tasks
 
 **Team Interaction:**
 • `/team` - Meet your AI team members
-• `/meeting` - Start a team meeting
-• `/ask [question]` - Ask the team anything
+• `/help` - Show this help message
 
 **Quick Actions:**
-• `/idea [description]` - Quick brainstorm
-• `/review [topic]` - Get team review
-• `/decide [options]` - Help with decisions
+• Just type naturally, and I'll route your message to the right team member!
 
-**Other Commands:**
-• `/help` - Show this help message
-• `/settings` - Configure preferences
-• `/cancel` - Cancel current operation
-
-💡 **Tip:** You can also just type naturally, and I'll route your message to the right team member!"""
+💡 **Tip:** Use the inline buttons for quick navigation!"""
         
         keyboard = [
             [InlineKeyboardButton("🚀 Start Project", callback_data="new_project")],
-            [InlineKeyboardButton("👥 Meet Team", callback_data="team_intro")]
+            [InlineKeyboardButton("👥 Meet Team", callback_data="team")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -498,208 +762,71 @@ What would you like to discuss with the team?"""
             reply_markup=reply_markup
         )
     
-    def setup_handlers(self, application):
+    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle errors in the bot"""
+        self.logger.error(f"Exception while handling an update: {context.error}")
+        
+        try:
+            # Log the error with traceback
+            tb_string = ''.join(traceback.format_exception(None, context.error, context.error.__traceback__))
+            self.logger.error(tb_string)
+            
+            # Notify user if possible
+            if isinstance(update, Update) and update.effective_message:
+                await update.effective_message.reply_text(
+                    "⚠️ Sorry, an error occurred while processing your request. Please try again.",
+                    parse_mode='Markdown'
+                )
+                
+        except Exception:
+            pass
+    
+    def setup_handlers(self):
         """Setup all command and message handlers"""
         # Command handlers
-        application.add_handler(CommandHandler("start", self.start))
-        application.add_handler(CommandHandler("newproject", self.new_project))
-        application.add_handler(CommandHandler("status", self.status_command))
-        application.add_handler(CommandHandler("team", self.team_command))
-        application.add_handler(CommandHandler("help", self.help_command))
-        application.add_handler(CommandHandler("meeting", self.meeting))
-        application.add_handler(CommandHandler("sprint", self.sprint_planning))
+        self.application.add_handler(CommandHandler("start", self.start))
+        self.application.add_handler(CommandHandler("newproject", self.new_project))
+        self.application.add_handler(CommandHandler("status", self.status_command))
+        self.application.add_handler(CommandHandler("team", self.team_command))
+        self.application.add_handler(CommandHandler("help", self.help_command))
         
         # Callback query handler
-        application.add_handler(CallbackQueryHandler(self.handle_callback_query))
+        self.application.add_handler(CallbackQueryHandler(self.handle_callback_query))
         
         # Message handler
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+        
+        # Error handler
+        self.application.add_error_handler(self.error_handler)
     
     async def initialize(self):
         """Initialize the bot application"""
         try:
-            # Create defaults with proper pytz timezone
-            defaults = Defaults(tzinfo=pytz.UTC)  # Use UTC as the default timezone
+            # Create application
+            self.application = Application.builder().token(self.token).build()
             
-            # Initialize application with defaults
-            self.application = (
-                Application.builder()
-                .token(self.token)
-                .defaults(defaults)
-                .build()
-            )
-            self.setup_handlers(self.application)
+            # Set up handlers
+            self.setup_handlers()
             
-            # Add error handler
-            self.application.add_error_handler(self.error_handler)
+            self.logger.info("Bot initialized successfully")
             
         except Exception as e:
             self.logger.error(f"Error initializing bot: {e}")
             raise
     
-    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle errors in the bot"""
-        error = context.error
-        self.logger.error(f"Update {update} caused error: {error}")
-        
+    def run(self):
+        """Run the bot (synchronous wrapper)"""
         try:
-            if update and update.effective_message:
-                error_message = "⚠️ Sorry, I encountered an error. "
-                
-                if isinstance(error, telegram_error.NetworkError):
-                    error_message += "Network connection issue. Please try again in a moment."
-                elif isinstance(error, telegram_error.Unauthorized):
-                    error_message += "Bot token is invalid or expired."
-                elif isinstance(error, telegram_error.BadRequest):
-                    error_message += "Invalid request. Please check your input."
-                elif isinstance(error, telegram_error.TimedOut):
-                    error_message += "Request timed out. Please try again."
-                elif isinstance(error, telegram_error.Conflict):
-                    error_message += "Another request is in progress. Please wait."
-                else:
-                    error_message += "Please try again or use /help for available commands."
-                
-                await update.effective_message.reply_text(
-                    error_message,
-                    parse_mode='Markdown'
-                )
-                
-                # Log detailed error for debugging
-                self.logger.error(f"Detailed error: {traceback.format_exc()}")
-                
-        except Exception as e:
-            self.logger.error(f"Error in error handler: {e}")
-            self.logger.error(f"Original error: {traceback.format_exc()}")
-    
-    async def run(self):
-        """Run the bot"""
-        try:
-            self.logger.info("Starting Synapse Bot...")
-            await self.initialize()
+            # Initialize application
+            self.application = Application.builder().token(self.token).build()
             
-            # Start polling
-            await self.application.run_polling(
-                allowed_updates=Update.ALL_TYPES,
-                drop_pending_updates=True
-            )
+            # Set up handlers
+            self.setup_handlers()
+            
+            # Start the bot
+            self.logger.info("Starting Synapse Bot...")
+            self.application.run_polling(allowed_updates=Update.ALL_TYPES)
             
         except Exception as e:
             self.logger.error(f"Error running bot: {e}")
             raise
-
-    async def meeting(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /meeting command"""
-        user_id = update.effective_user.id
-        
-        # Get meeting topic from command args or default
-        topic = ' '.join(context.args) if context.args else "General team meeting"
-        
-        # Send typing action
-        await context.bot.send_chat_action(
-            chat_id=update.effective_chat.id,
-            action="typing"
-        )
-        
-        # Start meeting message
-        await update.message.reply_text(
-            f"👥 **Starting Team Meeting**\n\nTopic: {topic}\n\nGathering team responses...",
-            parse_mode='Markdown'
-        )
-        
-        try:
-            # Get responses from all agents
-            meeting_task = {
-                'type': 'team_meeting',
-                'topic': topic,
-                'context': 'Team meeting discussion'
-            }
-            
-            responses = await self.orchestrator.get_team_consensus(meeting_task)
-            
-            # Send each response with a delay
-            for agent, response in responses.items():
-                await asyncio.sleep(1.5)  # Delay between responses
-                await self.format_and_send_response(update, response)
-                
-        except Exception as e:
-            self.logger.error(f"Error in meeting: {e}")
-            await update.message.reply_text(
-                "⚠️ Error during team meeting. Please try again.",
-                parse_mode='Markdown'
-            )
-
-    async def sprint_planning(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /sprint command"""
-        user_id = update.effective_user.id
-        
-        # Get sprint goal from command args or default
-        sprint_goal = ' '.join(context.args) if context.args else "Next development cycle"
-        
-        # Send typing action
-        await context.bot.send_chat_action(
-            chat_id=update.effective_chat.id,
-            action="typing"
-        )
-        
-        # Start sprint planning message
-        await update.message.reply_text(
-            f"📋 **Starting Sprint Planning**\n\nGoal: {sprint_goal}\n\nProject Manager is preparing...",
-            parse_mode='Markdown'
-        )
-        
-        try:
-            # Get sprint planning responses
-            planning_task = {
-                'type': 'sprint_planning',
-                'goal': sprint_goal,
-                'context': 'Sprint planning session'
-            }
-            
-            responses = await self.orchestrator.handle_planning_task(planning_task)
-            
-            # Send each response with a delay
-            for response in responses:
-                await asyncio.sleep(1.5)  # Delay between responses
-                await self.format_and_send_response(update, response)
-                
-        except Exception as e:
-            self.logger.error(f"Error in sprint planning: {e}")
-            await update.message.reply_text(
-                "⚠️ Error during sprint planning. Please try again.",
-                parse_mode='Markdown'
-            )
-
-    async def format_and_send_response(self, update: Update, response: Dict) -> None:
-        """Format and send agent response"""
-        try:
-            # Format the response
-            formatted = self._format_agent_response(response)
-            
-            # Escape special characters for Markdown
-            formatted = formatted.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]')
-            
-            # Send the message
-            if update.callback_query:
-                await update.callback_query.message.reply_text(
-                    formatted,
-                    parse_mode='Markdown',
-                    disable_web_page_preview=True
-                )
-            else:
-                await update.message.reply_text(
-                    formatted,
-                    parse_mode='Markdown',
-                    disable_web_page_preview=True
-                )
-                
-        except Exception as e:
-            self.logger.error(f"Error formatting response: {e}")
-            # Fallback to plain text if Markdown fails
-            try:
-                plain_text = response.get('content', 'No response available')
-                if update.callback_query:
-                    await update.callback_query.message.reply_text(plain_text)
-                else:
-                    await update.message.reply_text(plain_text)
-            except Exception as e2:
-                self.logger.error(f"Error sending fallback response: {e2}")

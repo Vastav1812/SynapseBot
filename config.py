@@ -1,14 +1,15 @@
+# config.py
+
 import os
 from dotenv import load_dotenv
-from typing import Dict, Any
 
 # Load environment variables
 load_dotenv()
 
 class Config:
-    """Application configuration"""
+    """Configuration class for the Synapse Bot"""
     
-    # Bot Configuration
+    # Telegram Configuration
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     BOT_USERNAME = os.getenv('BOT_USERNAME', 'SynapseBot')
     
@@ -26,15 +27,12 @@ class Config:
     DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     
-    # Database Configuration (if needed)
-    DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///synapse_bot.db')
-    
     # Rate Limiting
     RATE_LIMIT_MESSAGES = int(os.getenv('RATE_LIMIT_MESSAGES', '30'))
-    RATE_LIMIT_WINDOW = int(os.getenv('RATE_LIMIT_WINDOW', '60'))  # seconds
+    RATE_LIMIT_WINDOW = int(os.getenv('RATE_LIMIT_WINDOW', '60'))
     
     # Agent Configuration
-    AGENT_RESPONSE_TIMEOUT = int(os.getenv('AGENT_RESPONSE_TIMEOUT', '30'))  # seconds
+    AGENT_RESPONSE_TIMEOUT = int(os.getenv('AGENT_RESPONSE_TIMEOUT', '30'))
     MAX_CONVERSATION_HISTORY = int(os.getenv('MAX_CONVERSATION_HISTORY', '100'))
     
     # Feature Flags
@@ -43,35 +41,12 @@ class Config:
     ENABLE_INLINE_MODE = os.getenv('ENABLE_INLINE_MODE', 'False').lower() == 'true'
     
     @classmethod
-    def validate(cls) -> bool:
+    def validate(cls):
         """Validate required configuration"""
-        required = ['TELEGRAM_BOT_TOKEN', 'GEMINI_API_KEY']
-        missing = []
+        if not cls.TELEGRAM_BOT_TOKEN:
+            raise ValueError("TELEGRAM_BOT_TOKEN is required")
         
-        for field in required:
-            if not getattr(cls, field):
-                missing.append(field)
-        
-        if missing:
-            print(f"Missing required configuration: {', '.join(missing)}")
-            return False
+        if not cls.GEMINI_API_KEY:
+            raise ValueError("GEMINI_API_KEY is required")
         
         return True
-    
-    @classmethod
-    def get_model_config(cls) -> Dict[str, Any]:
-        """Get model configuration"""
-        return {
-            'temperature': cls.MODEL_TEMPERATURE,
-            'top_p': cls.MODEL_TOP_P,
-            'top_k': cls.MODEL_TOP_K,
-            'max_output_tokens': cls.MODEL_MAX_TOKENS
-        }
-    
-    @classmethod
-    def get_agent_config(cls) -> Dict[str, Any]:
-        """Get agent configuration"""
-        return {
-            'timeout': cls.AGENT_RESPONSE_TIMEOUT,
-            'max_history': cls.MAX_CONVERSATION_HISTORY
-        }

@@ -1,0 +1,17 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Add label
+LABEL maintainer="Synapse Bot Team"
+LABEL description="Synapsebot - AI Company Bot"
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Run the bot
+CMD ["python", "main.py"]

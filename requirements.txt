@@ -1,31 +1,31 @@
-# Core dependencies
-python-telegram-bot==22.1
-google-generativeai==0.3.2
-python-dotenv==1.0.0
-pytz
+# Telegram Bot
+python-telegram-bot>=20.7
 
-# Async support
-# asyncio is part of Python 3.11 stdlib, no need to specify
-# aiohttp is not required for python-telegram-bot 22.1
+# Google Gemini AI
+google-generativeai>=0.3.0
 
-# Utilities
-pydantic==2.5.3
-python-dateutil==2.8.2
+# Environment Variables
+python-dotenv>=1.0.0
 
-# Logging and monitoring
-loguru==0.7.2
+# Timezone Support
+pytz>=2023.3
 
-# Development dependencies
-pytest==7.4.4
-pytest-asyncio==0.23.3
-black==23.12.1
-flake8==7.0.0
+# Async Support
+asyncio>=3.4.3
 
-# Optional dependencies for enhanced features
-pillow==10.2.0  # For image processing
-numpy==1.26.3  # For data processing
-pandas==2.1.4  # For analytics
+# Logging
+colorlog>=6.7.0
 
-# Database (optional)
-sqlalchemy==2.0.25
-alembic==1.13.1
+# Optional: Database Support
+# sqlalchemy>=2.0.0
+# aiosqlite>=0.19.0
+
+# Optional: Redis for caching
+# redis>=5.0.0
+# aioredis>=2.0.0
+
+# Development Tools
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+flake8>=6.0.0
